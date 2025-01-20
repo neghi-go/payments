@@ -7,8 +7,8 @@ import (
 )
 
 type Card struct {
-	ID       uuid.UUID
-	UserID   uuid.UUID
-	AuthKey  string `json:"-" db:"auth_key"`
-	LastUsed time.Time
+	ID         uuid.UUID `json:"-" db:"id,index,unique,required"`
+	CustomerID uuid.UUID `json:"-" db:"customer_id,index"`
+	AuthKey    string    `json:"-" db:"auth_key"`
+	LastUsed   time.Time `json:"last_used" db:"last_used"`
 }
