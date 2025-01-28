@@ -230,26 +230,28 @@ func (p *Paystack) Refund(ctx context.Context, trx_id uuid.UUID) error {
 }
 
 // Verify implements processors.Processor.
-func (p *Paystack) Verify(ctx context.Context, trx_id uuid.UUID) error {
+func (p *Paystack) Verify(ctx context.Context, trx_id string) (bool, error) {
 	client := http.DefaultClient
 	var res_body trxResponse
 
-	req, _ := http.NewRequestWithContext(ctx, http.MethodPost, base_url+verify_url+"/"+trx_id.String(), nil)
+	req, _ := http.NewRequestWithContext(ctx, http.MethodPost, base_url+verify_url+"/"+trx_id, nil)
 	req.Header.Add("Content-Type", "application/json")
 	req.Header.Add("Authorization", "Bearer "+p.key)
 
 	res, err := client.Do(req)
 	if err != nil {
-		return err
+		return false, err
 	}
 
 	defer res.Body.Close()
 
 	if err := json.NewDecoder(res.Body).Decode(&res_body); err != nil {
-		return err
+		return false, err
 	}
-	return nil
+	return true, nil
 }
+
+func (p *Paystack) Webhook(ctx context.Context, r *http.Request) error { return nil }
 
 func SetKey(key string) Option {
 	return func(p *Paystack) {

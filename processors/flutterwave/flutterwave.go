@@ -2,6 +2,7 @@ package flutterwave
 
 import (
 	"context"
+	"net/http"
 
 	"github.com/google/uuid"
 	"github.com/neghi-go/payments/processors"
@@ -25,9 +26,10 @@ func (f *Flutterwave) Refund(ctx context.Context, trx_id uuid.UUID) error {
 }
 
 // Verify implements processors.Processor.
-func (f *Flutterwave) Verify(ctx context.Context, trx_id uuid.UUID) error {
+func (f *Flutterwave) Verify(ctx context.Context, trx_id string) (bool, error) {
 	panic("unimplemented")
 }
+func (f *Flutterwave) Webhook(ctx context.Context, r *http.Request) error { return nil }
 
 type Option func(*Flutterwave)
 
