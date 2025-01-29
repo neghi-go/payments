@@ -17,5 +17,5 @@ type BillingContext struct {
 
 type Billing struct {
 	Name string
-	Init func(r chi.Router, ctx BillingContext)
+	Init func(r chi.Router, ctx *BillingContext)
 }

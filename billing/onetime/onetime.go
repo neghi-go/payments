@@ -2,12 +2,15 @@ package onetime
 
 import (
 	"encoding/json"
+	"fmt"
 	"net/http"
 
 	"github.com/go-chi/chi/v5"
+	"github.com/google/uuid"
 	"github.com/neghi-go/database"
 	"github.com/neghi-go/payments/billing"
 	"github.com/neghi-go/payments/internal/models"
+	"github.com/neghi-go/payments/utils"
 )
 
 type Action string
@@ -19,25 +22,25 @@ var (
 type Options func(*depositBilling) error
 
 type depositBilling struct {
-	customer    database.Model[models.Customer]
-	invoice     database.Model[models.Invoice]
-	card        database.Model[models.Card]
-	transaction database.Model[models.Transaction]
-	notify      func() error
+	notify func() error
 }
 
 func NewDepositBilling(opts ...Options) *billing.Billing {
-	cfg := &depositBilling{}
+	_ = &depositBilling{}
 	return &billing.Billing{
-		Name: "deposit",
-		Init: func(r chi.Router, ctx billing.BillingContext) {
+		Name: "onetime",
+		Init: func(r chi.Router, ctx *billing.BillingContext) {
 			r.Post("/charge", func(w http.ResponseWriter, r *http.Request) {
-				var amount int64
+				var (
+					amount  int64
+					invoice *models.Invoice
+					trx     *models.Transaction
+				)
 				action := r.URL.Query().Get("action")
 				//get payment data
 				var body struct {
 					CustomerID string `json:"customer_id"`
-					Amount     int    `json:"amount"`
+					Amount     int64  `json:"amount"`
 					InvoiceID  string `json:"invoice_id"`
 				}
 
@@ -46,24 +49,35 @@ func NewDepositBilling(opts ...Options) *billing.Billing {
 					return
 				}
 
-				customer, err := cfg.customer.Query(database.WithFilter("id", body.CustomerID)).First()
+				customer, err := ctx.Customer.Query(database.WithFilter("id", uuid.MustParse(body.CustomerID))).First()
 				if err != nil {
-					w.WriteHeader(http.StatusInternalServerError)
+					w.WriteHeader(http.StatusNotFound)
 					return
 				}
 
 				switch Action(action) {
 				case create:
 					//create a new invoice
-					invoice := &models.Invoice{}
-					if err := cfg.invoice.Save(*invoice); err != nil {
+					invoice = &models.Invoice{
+						ID:         uuid.New(),
+						CustomerID: uuid.MustParse(body.CustomerID),
+						Amount:     int64(body.Amount),
+						Status:     "PENDING",
+					}
+					if err := ctx.Invoice.Save(*invoice); err != nil {
 						w.WriteHeader(http.StatusBadRequest)
 						return
 					}
 
 					//create a new transaction
-					trx := &models.Transaction{}
-					if err := cfg.transaction.Save(*trx); err != nil {
+					trx = &models.Transaction{
+						ID:        uuid.New(),
+						InvoiceID: invoice.ID,
+						Amount:    invoice.Amount,
+						Status:    models.TrxPending,
+						Reference: utils.GenerateReference(12),
+					}
+					if err := ctx.Transactions.Save(*trx); err != nil {
 						w.WriteHeader(http.StatusBadRequest)
 						return
 					}
@@ -71,7 +85,7 @@ func NewDepositBilling(opts ...Options) *billing.Billing {
 				default:
 					//check for invoice status
 					//if status is not paid, canceled, proceed
-					invoice, err := cfg.invoice.Query(database.WithFilter("id", body.InvoiceID)).First()
+					invoice, err = ctx.Invoice.Query(database.WithFilter("id", body.InvoiceID)).First()
 					if err != nil {
 						w.WriteHeader(http.StatusBadRequest)
 						return
@@ -84,7 +98,7 @@ func NewDepositBilling(opts ...Options) *billing.Billing {
 
 					//check state of last transaction
 					//if status is not pending or success, proceed
-					trx, err := cfg.transaction.Query(
+					tranx, err := ctx.Transactions.Query(
 						database.WithFilter("invoice_id", invoice.ID),
 					).All()
 					if err != nil {
@@ -92,32 +106,32 @@ func NewDepositBilling(opts ...Options) *billing.Billing {
 						return
 					}
 
-					lastTRX := trx[len(trx)-1]
-					if lastTRX.Status == models.TrxFailed {
+					trx = tranx[len(tranx)-1]
+					if trx.Status == models.TrxFailed {
 						//create new trx
-						trx := models.Transaction{}
-						if err := cfg.transaction.Save(trx); err != nil {
+						trx = &models.Transaction{}
+						if err := ctx.Transactions.Save(*trx); err != nil {
 							w.WriteHeader(http.StatusBadRequest)
 							return
 						}
 						amount = int64(invoice.Amount)
 					}
-					if lastTRX.Status == models.TrxPending {
+					if trx.Status == models.TrxPending {
 						var valid bool
 						//verify transaction and update accordingly
-						if valid, err = ctx.Processor.Verify(r.Context(), lastTRX.ID.String()); err != nil {
+						if valid, err = ctx.Processor.Verify(r.Context(), trx.ID.String()); err != nil {
 							w.WriteHeader(http.StatusBadRequest)
 							return
 						}
 
 						if valid {
 							invoice.Status = ""
-							lastTRX.Status = models.TrxSuccess
-							if err := cfg.invoice.Query(database.WithFilter("id", invoice.ID)).Update(*invoice); err != nil {
+							trx.Status = models.TrxSuccess
+							if err := ctx.Invoice.Query(database.WithFilter("id", invoice.ID)).Update(*invoice); err != nil {
 								w.WriteHeader(http.StatusBadRequest)
 								return
 							}
-							if err := cfg.transaction.Query(database.WithFilter("id", lastTRX)).Update(*lastTRX); err != nil {
+							if err := ctx.Transactions.Query(database.WithFilter("id", trx)).Update(*trx); err != nil {
 								w.WriteHeader(http.StatusBadRequest)
 								return
 							}
@@ -125,10 +139,10 @@ func NewDepositBilling(opts ...Options) *billing.Billing {
 							return
 						}
 					}
-					if lastTRX.Status == models.TrxSuccess {
+					if trx.Status == models.TrxSuccess {
 						//update invoice to paid.
 						invoice.Status = ""
-						if err := cfg.invoice.Query(database.WithFilter("id", invoice.ID)).Update(*invoice); err != nil {
+						if err := ctx.Invoice.Query(database.WithFilter("id", invoice.ID)).Update(*invoice); err != nil {
 							w.WriteHeader(http.StatusBadRequest)
 							return
 						}
@@ -138,62 +152,56 @@ func NewDepositBilling(opts ...Options) *billing.Billing {
 					}
 				}
 				//check if user has a valid card, if yes, attempt to charge card else, generate payment url and redirect
-				validCard, err := cfg.card.Query(database.WithFilter("", "")).First()
+				validCard, err := ctx.Card.Query(database.WithFilter("customer_id", uuid.MustParse(body.CustomerID))).First()
 				if err != nil {
-					if err := ctx.Processor.Charge(r.Context(), customer.Email, amount, validCard.AuthKey); err != nil {
-						w.WriteHeader(http.StatusBadRequest)
+					auth_url, err := ctx.Processor.Init(r.Context(), customer.Email, amount, trx.Reference)
+					if err != nil {
+						w.WriteHeader(http.StatusOK)
 						return
 					}
+					fmt.Println(auth_url)
 					w.WriteHeader(http.StatusOK)
+					w.Write([]byte(auth_url))
 					return
 				}
-				auth_url, err := ctx.Processor.Init(r.Context(), customer.Email, amount)
-				if err != nil {
-					w.WriteHeader(http.StatusOK)
+				if err := ctx.Processor.Charge(r.Context(), customer.Email, amount, validCard.AuthKey, trx.Reference); err != nil {
+					w.WriteHeader(http.StatusBadRequest)
 					return
 				}
-				w.Write([]byte(auth_url))
 				w.WriteHeader(http.StatusOK)
-				return
 			})
-			r.Post("/verify", func(w http.ResponseWriter, r *http.Request) {
+			r.Post("/verify/{id}", func(w http.ResponseWriter, r *http.Request) {
 				var valid bool
 				var err error
-				var body struct {
-					TransactionID string `json:"transaction_id"`
-				}
-				if err = json.NewDecoder(r.Body).Decode(&body); err != nil {
-					w.WriteHeader(http.StatusInternalServerError)
+				TransactionID := r.PathValue("id")
+
+				trx, err := ctx.Transactions.Query(database.WithFilter("id", uuid.MustParse(TransactionID))).First()
+				if err != nil {
+					w.WriteHeader(http.StatusBadGateway)
 					return
 				}
-
-				if valid, err = ctx.Processor.Verify(r.Context(), body.TransactionID); err != nil {
+				if valid, err = ctx.Processor.Verify(r.Context(), trx.Reference); err != nil {
 					w.WriteHeader(http.StatusBadRequest)
+					w.Write([]byte(err.Error()))
 					return
 				}
 				if valid {
 
 					//if successfull, look and update invoice status
-					trx, err := cfg.transaction.Query(database.WithFilter("id", body.TransactionID)).First()
-					if err != nil {
-						w.WriteHeader(http.StatusBadGateway)
-						return
-					}
+					trx.Status = models.TrxSuccess
 
-					trx.Status = "PAID"
-
-					if err := cfg.transaction.Query(database.WithFilter("id", trx.ID)).Update(*trx); err != nil {
+					if err := ctx.Transactions.Query(database.WithFilter("id", trx.ID)).Update(*trx); err != nil {
 						w.WriteHeader(http.StatusBadRequest)
 						return
 					}
 
-					inv, err := cfg.invoice.Query(database.WithFilter("id", trx.InvoiceID)).First()
+					inv, err := ctx.Invoice.Query(database.WithFilter("id", trx.InvoiceID)).First()
 					if err != nil {
 						w.WriteHeader(http.StatusBadGateway)
 						return
 					}
 					inv.Status = "PAID"
-					if err := cfg.invoice.Query(database.WithFilter("id", inv.ID)).Update(*inv); err != nil {
+					if err := ctx.Invoice.Query(database.WithFilter("id", inv.ID)).Update(*inv); err != nil {
 						w.WriteHeader(http.StatusBadRequest)
 						return
 					}

@@ -11,12 +11,12 @@ import (
 type Flutterwave struct{}
 
 // Charge implements processors.Processor.
-func (f *Flutterwave) Charge(ctx context.Context, email string, amount int64, card_token string) error {
+func (f *Flutterwave) Charge(ctx context.Context, email string, amount int64, card_token string, reference string) error {
 	panic("unimplemented")
 }
 
 // Init implements processors.Processor.
-func (f *Flutterwave) Init(ctx context.Context, email string, amount int64) (string, error) {
+func (f *Flutterwave) Init(ctx context.Context, email string, amount int64, reference string) (string, error) {
 	panic("unimplemented")
 }
 

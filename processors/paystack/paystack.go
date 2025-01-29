@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"time"
 
@@ -14,7 +15,7 @@ import (
 var (
 	base_url       = "https://api.paystack.co"
 	initialize_url = "/transaction/initialize"
-	verify_url     = "/transaction/verify/"
+	verify_url     = "/transaction/verify"
 	charge_url     = ""
 	refund_url     = ""
 )
@@ -39,19 +40,19 @@ type trxResponse struct {
 	Status  bool   `json:"status"`
 	Message string `json:"message"`
 	Data    struct {
-		Amount          int64     `json:"amount"`
-		Currency        string    `json:"currency"`
-		TransactionDate time.Time `json:"transaction_date"`
-		Status          string    `json:"status"`
-		Reference       string    `json:"reference"`
-		Domain          string    `json:"domain"`
-		Metadata        string    `json:"metadata"`
-		GateWayResponse string    `json:"gateway_response"`
-		Message         string    `json:"message"`
-		Channel         string    `json:"channel"`
-		IPAddress       string    `json:"ip_address"`
-		Log             string    `json:"log"`
-		Fees            int64     `json:"fees"`
+		Amount          int64                  `json:"amount"`
+		Currency        string                 `json:"currency"`
+		TransactionDate time.Time              `json:"transaction_date"`
+		Status          string                 `json:"status"`
+		Reference       string                 `json:"reference"`
+		Domain          string                 `json:"domain"`
+		Metadata        string                 `json:"metadata"`
+		GateWayResponse string                 `json:"gateway_response"`
+		Message         string                 `json:"message"`
+		Channel         string                 `json:"channel"`
+		IPAddress       string                 `json:"ip_address"`
+		Log             map[string]interface{} `json:"log"`
+		Fees            int64                  `json:"fees"`
 		Authorization   struct {
 			AuthorizationCode string `json:"authorization_code"`
 			Bin               string `json:"bin"`
@@ -135,7 +136,7 @@ type refundResponse struct {
 }
 
 // Charge implements processors.Processor.
-func (p *Paystack) Charge(ctx context.Context, email string, amount int64, card_token string) error {
+func (p *Paystack) Charge(ctx context.Context, email string, amount int64, card_token string, reference string) error {
 	client := http.DefaultClient
 	var res_body trxResponse
 	buf := &bytes.Buffer{}
@@ -143,10 +144,12 @@ func (p *Paystack) Charge(ctx context.Context, email string, amount int64, card_
 		Card_Token string
 		Email      string `json:"email"`
 		Amount     int64  `json:"amount"`
+		Reference  string `json:"reference"`
 	}{
 		Card_Token: card_token,
 		Email:      email,
 		Amount:     amount,
+		Reference:  reference,
 	}
 	err := json.NewEncoder(buf).Encode(body)
 	if err != nil {
@@ -170,17 +173,19 @@ func (p *Paystack) Charge(ctx context.Context, email string, amount int64, card_
 }
 
 // Init implements processors.Processor.
-func (p *Paystack) Init(ctx context.Context, email string, amount int64) (string, error) {
+func (p *Paystack) Init(ctx context.Context, email string, amount int64, reference string) (string, error) {
 	var res_body initiateResponse
 
 	buf := &bytes.Buffer{}
 
 	body := struct {
-		Email  string `json:"email"`
-		Amount int64  `json:"amount"`
+		Email     string `json:"email"`
+		Amount    int64  `json:"amount"`
+		Reference string `json:"reference"`
 	}{
-		Email:  email,
-		Amount: amount,
+		Email:     email,
+		Amount:    amount,
+		Reference: reference,
 	}
 
 	err := json.NewEncoder(buf).Encode(body)
@@ -203,6 +208,7 @@ func (p *Paystack) Init(ctx context.Context, email string, amount int64) (string
 	if err := json.NewDecoder(res.Body).Decode(&res_body); err != nil {
 		return "", err
 	}
+	fmt.Println(res_body)
 
 	return res_body.Data.AuthorizationURL, nil
 }
@@ -231,10 +237,14 @@ func (p *Paystack) Refund(ctx context.Context, trx_id uuid.UUID) error {
 
 // Verify implements processors.Processor.
 func (p *Paystack) Verify(ctx context.Context, trx_id string) (bool, error) {
+	url := &bytes.Buffer{}
+
+	url.WriteString(base_url)
+	url.WriteString(verify_url)
 	client := http.DefaultClient
 	var res_body trxResponse
 
-	req, _ := http.NewRequestWithContext(ctx, http.MethodPost, base_url+verify_url+"/"+trx_id, nil)
+	req, _ := http.NewRequestWithContext(ctx, http.MethodGet, url.String()+"/"+trx_id, nil)
 	req.Header.Add("Content-Type", "application/json")
 	req.Header.Add("Authorization", "Bearer "+p.key)
 
@@ -244,7 +254,6 @@ func (p *Paystack) Verify(ctx context.Context, trx_id string) (bool, error) {
 	}
 
 	defer res.Body.Close()
-
 	if err := json.NewDecoder(res.Body).Decode(&res_body); err != nil {
 		return false, err
 	}
