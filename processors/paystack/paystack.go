@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"net/http"
 	"time"
 
@@ -141,16 +142,16 @@ func (p *Paystack) Charge(ctx context.Context, email string, amount int64, card_
 	buf := &bytes.Buffer{}
 	body := struct {
 		Card_Token string
-		Email      string `json:"email"`
-		Amount     int64  `json:"amount"`
-		Reference  string `json:"reference"`
-        Channels []string `json:"channels"`
+		Email      string   `json:"email"`
+		Amount     int64    `json:"amount"`
+		Reference  string   `json:"reference"`
+		Channels   []string `json:"channels"`
 	}{
 		Card_Token: card_token,
 		Email:      email,
 		Amount:     amount,
 		Reference:  reference,
-        Channels: []string{"card"},
+		Channels:   []string{"card"},
 	}
 	err := json.NewEncoder(buf).Encode(body)
 	if err != nil {
@@ -179,15 +180,15 @@ func (p *Paystack) Init(ctx context.Context, email string, amount int64, referen
 	buf := &bytes.Buffer{}
 
 	body := struct {
-		Email     string `json:"email"`
-		Amount    int64  `json:"amount"`
-		Reference string `json:"reference"`
-        Channels []string `json:"channels"`
+		Email     string   `json:"email"`
+		Amount    int64    `json:"amount"`
+		Reference string   `json:"reference"`
+		Channels  []string `json:"channels"`
 	}{
 		Email:     email,
 		Amount:    amount,
 		Reference: reference,
-        Channels: []string{"card"},
+		Channels:  []string{"card"},
 	}
 
 	err := json.NewEncoder(buf).Encode(body)
@@ -236,7 +237,8 @@ func (p *Paystack) Refund(ctx context.Context, trx_id uuid.UUID) error {
 }
 
 // Verify implements processors.Processor.
-func (p *Paystack) Verify(ctx context.Context, trx_id string) (bool, error) {
+func (p *Paystack) Verify(ctx context.Context, trx_id string) (processors.VerifyState, error) {
+	var r processors.VerifyState
 	url := &bytes.Buffer{}
 
 	url.WriteString(base_url)
@@ -250,14 +252,34 @@ func (p *Paystack) Verify(ctx context.Context, trx_id string) (bool, error) {
 
 	res, err := client.Do(req)
 	if err != nil {
-		return false, err
+		return 0, err
 	}
 
 	defer res.Body.Close()
 	if err := json.NewDecoder(res.Body).Decode(&res_body); err != nil {
-		return false, err
+		return 0, err
 	}
-	return true, nil
+
+	if !res_body.Status {
+		return 0, errors.New("paystack: we had an issue verifying that transaction")
+	}
+
+	switch res_body.Data.Status {
+	case "success":
+		r = processors.Success
+	case "abandoned":
+		r = processors.Abandoned
+	case "pending":
+		r = processors.Pending
+	case "reversed":
+		r = processors.Reversed
+	case "failed":
+		r = processors.Failed
+	default:
+		r = 0
+	}
+
+	return r, nil
 }
 
 func (p *Paystack) Webhook(ctx context.Context, r *http.Request) error { return nil }
