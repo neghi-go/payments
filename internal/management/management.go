@@ -30,7 +30,7 @@ func NewManagement() *billing.Billing {
 						SetStatusCode(http.StatusBadRequest).SetMessage(err.Error()).Send()
 					return
 				}
-				utilities.JSON(w).SetLimit(lim).SetPage(1).SetStatusCode(http.StatusOK).
+				utilities.JSON(w).SetLimit(10).SetPage(1).SetStatusCode(http.StatusOK).
 					SetStatus(utilities.ResponseSuccess).SetData(customers).Send()
 			})
 			r.Post("/", func(w http.ResponseWriter, r *http.Request) {
@@ -74,7 +74,44 @@ func NewManagement() *billing.Billing {
 						SetStatus(utilities.ResponseSuccess).SetData(customers).Send()
 				})
 				r.Patch("/", func(w http.ResponseWriter, r *http.Request) {})
-				r.Delete("/", func(w http.ResponseWriter, r *http.Request) {})
+				r.Delete("/", func(w http.ResponseWriter, r *http.Request) {
+					id := r.PathValue("customer_id")
+					if err := ctx.Customer.Query(database.WithFilter("id", uuid.MustParse(id))).Delete(); err != nil {
+						utilities.JSON(w).SetStatus(utilities.ResponseError).
+							SetStatusCode(http.StatusBadRequest).SetMessage(err.Error()).Send()
+						return
+					}
+
+					//delete invoices, transactions, cards
+					invoices, err := ctx.Invoice.Query(database.WithFilter("customer_id", uuid.MustParse(id))).All()
+					if err != nil {
+						utilities.JSON(w).SetStatus(utilities.ResponseError).
+							SetStatusCode(http.StatusBadRequest).SetMessage(err.Error()).Send()
+						return
+					}
+
+					for _, inv := range invoices {
+						if err := ctx.Transactions.Query(database.WithFilter("invoice_id", inv.ID)).DeleteMany(); err != nil {
+							utilities.JSON(w).SetStatus(utilities.ResponseError).
+								SetStatusCode(http.StatusBadRequest).SetMessage(err.Error()).Send()
+							return
+						}
+					}
+					if err := ctx.Invoice.Query(database.WithFilter("customer_id", uuid.MustParse(id))).DeleteMany(); err != nil {
+						utilities.JSON(w).SetStatus(utilities.ResponseError).
+							SetStatusCode(http.StatusBadRequest).SetMessage(err.Error()).Send()
+						return
+					}
+					if err := ctx.Card.Query(database.WithFilter("customer_id", uuid.MustParse(id))).DeleteMany(); err != nil {
+						utilities.JSON(w).SetStatus(utilities.ResponseError).
+							SetStatusCode(http.StatusBadRequest).SetMessage(err.Error()).Send()
+						return
+					}
+
+					utilities.JSON(w).SetStatusCode(http.StatusNoContent).
+						SetStatus(utilities.ResponseSuccess).Send()
+
+				})
 				r.Route("/cards", func(r chi.Router) {
 					r.Get("/", func(w http.ResponseWriter, r *http.Request) {
 						id := r.PathValue("customer_id")
@@ -108,7 +145,7 @@ func NewManagement() *billing.Billing {
 							inv.Transactions = transactions
 						}
 
-						utilities.JSON(w).SetStatusCode(http.StatusOK).
+						utilities.JSON(w).SetLimit(10).SetPage(1).SetStatusCode(http.StatusOK).
 							SetStatus(utilities.ResponseSuccess).SetData(invoices).Send()
 					})
 					r.Route("/{invoice_id}", func(r chi.Router) {
@@ -135,7 +172,8 @@ func NewManagement() *billing.Billing {
 							utilities.JSON(w).SetStatusCode(http.StatusOK).
 								SetStatus(utilities.ResponseSuccess).SetData(invoice).Send()
 						})
-						r.Patch("/", func(w http.ResponseWriter, r *http.Request) {})
+						r.Patch("/", func(w http.ResponseWriter, r *http.Request) {
+                        })
 						r.Route("/transactions", func(r chi.Router) {
 							r.Get("/", func(w http.ResponseWriter, r *http.Request) {
 								id := r.PathValue("invoice_id")
@@ -145,7 +183,7 @@ func NewManagement() *billing.Billing {
 										SetStatusCode(http.StatusBadRequest).SetMessage(err.Error()).Send()
 									return
 								}
-								utilities.JSON(w).SetStatusCode(http.StatusOK).
+								utilities.JSON(w).SetLimit(10).SetPage(1).SetStatusCode(http.StatusOK).
 									SetStatus(utilities.ResponseSuccess).SetData(transactions).Send()
 							})
 							r.Get("/{trx_id}", func(w http.ResponseWriter, r *http.Request) {
