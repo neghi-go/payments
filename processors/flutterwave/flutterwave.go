@@ -26,7 +26,7 @@ func (f *Flutterwave) Refund(ctx context.Context, trx_id uuid.UUID) error {
 }
 
 // Verify implements processors.Processor.
-func (f *Flutterwave) Verify(ctx context.Context, trx_id string) (bool, error) {
+func (f *Flutterwave) Verify(ctx context.Context, trx_id string) (processors.VerifyState, error) {
 	panic("unimplemented")
 }
 func (f *Flutterwave) Webhook(ctx context.Context, r *http.Request) error { return nil }
