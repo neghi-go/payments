@@ -2,7 +2,6 @@ package onetime
 
 import (
 	"encoding/json"
-	"fmt"
 	"net/http"
 
 	"github.com/go-chi/chi/v5"
@@ -62,7 +61,7 @@ func NewDepositBilling(opts ...Options) *billing.Billing {
 						ID:         uuid.New(),
 						CustomerID: uuid.MustParse(body.CustomerID),
 						Amount:     int64(body.Amount),
-						Status:     "PENDING",
+						Status:     models.InvDraft,
 					}
 					if err := ctx.Invoice.Save(*invoice); err != nil {
 						w.WriteHeader(http.StatusBadRequest)
@@ -91,7 +90,7 @@ func NewDepositBilling(opts ...Options) *billing.Billing {
 						return
 					}
 
-					if invoice.Status != "PAID" && invoice.Status != "CANCELED" {
+					if invoice.Status != models.InvPaid && invoice.Status != models.InvVoid {
 						w.WriteHeader(http.StatusBadRequest)
 						return
 					}
@@ -159,7 +158,6 @@ func NewDepositBilling(opts ...Options) *billing.Billing {
 						w.WriteHeader(http.StatusOK)
 						return
 					}
-					fmt.Println(auth_url)
 					w.WriteHeader(http.StatusOK)
 					w.Write([]byte(auth_url))
 					return
