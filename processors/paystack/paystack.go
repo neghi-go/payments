@@ -4,7 +4,6 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
-	"fmt"
 	"net/http"
 	"time"
 
@@ -145,11 +144,13 @@ func (p *Paystack) Charge(ctx context.Context, email string, amount int64, card_
 		Email      string `json:"email"`
 		Amount     int64  `json:"amount"`
 		Reference  string `json:"reference"`
+        Channels []string `json:"channels"`
 	}{
 		Card_Token: card_token,
 		Email:      email,
 		Amount:     amount,
 		Reference:  reference,
+        Channels: []string{"card"},
 	}
 	err := json.NewEncoder(buf).Encode(body)
 	if err != nil {
@@ -175,17 +176,18 @@ func (p *Paystack) Charge(ctx context.Context, email string, amount int64, card_
 // Init implements processors.Processor.
 func (p *Paystack) Init(ctx context.Context, email string, amount int64, reference string) (string, error) {
 	var res_body initiateResponse
-
 	buf := &bytes.Buffer{}
 
 	body := struct {
 		Email     string `json:"email"`
 		Amount    int64  `json:"amount"`
 		Reference string `json:"reference"`
+        Channels []string `json:"channels"`
 	}{
 		Email:     email,
 		Amount:    amount,
 		Reference: reference,
+        Channels: []string{"card"},
 	}
 
 	err := json.NewEncoder(buf).Encode(body)
@@ -208,8 +210,6 @@ func (p *Paystack) Init(ctx context.Context, email string, amount int64, referen
 	if err := json.NewDecoder(res.Body).Decode(&res_body); err != nil {
 		return "", err
 	}
-	fmt.Println(res_body)
-
 	return res_body.Data.AuthorizationURL, nil
 }
 
