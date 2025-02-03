@@ -140,23 +140,6 @@ func NewDepositBilling(opts ...Options) *billing.Billing {
 						}
 
 						trx = tranx[len(tranx)-1]
-						if trx.Status == models.TrxFailed {
-							invoice.LastAttempt = time.Now().UTC()
-							invoice.AttemptCount += 1
-							//create new trx
-							trx = &models.Transaction{
-								ID:        uuid.New(),
-								InvoiceID: invoice.ID,
-								Status:    models.TrxPending,
-								Reference: utilities.Generate(cfg.reference_length),
-							}
-							if err := ctx.Transactions.Save(*trx); err != nil {
-								utilities.JSON(w).SetMessage(err.Error()).SetStatus(utilities.ResponseFail).
-									SetStatusCode(http.StatusBadRequest).Send()
-								return
-							}
-							amount = invoice.Amount
-						}
 						if trx.Status == models.TrxPending {
 							var res processors.VerifyState
 							//verify transaction and update accordingly
@@ -220,6 +203,24 @@ func NewDepositBilling(opts ...Options) *billing.Billing {
 								return
 							}
 						}
+						if trx.Status == models.TrxFailed {
+							invoice.LastAttempt = time.Now().UTC()
+							invoice.AttemptCount += 1
+							//create new trx
+							trx = &models.Transaction{
+								ID:        uuid.New(),
+								InvoiceID: invoice.ID,
+								Status:    models.TrxPending,
+								Reference: utils.GenerateReference(cfg.reference_length),
+							}
+							if err := ctx.Transactions.Save(*trx); err != nil {
+								utilities.JSON(w).SetMessage(err.Error()).SetStatus(utilities.ResponseFail).
+									SetStatusCode(http.StatusBadRequest).Send()
+								return
+							}
+							amount = invoice.Amount
+						}
+
 						if trx.Status == models.TrxSuccess {
 							//update invoice to paid.
 							utilities.JSON(w).SetMessage("Invoice has been cleared!").SetStatus(utilities.ResponseSuccess).
@@ -317,7 +318,7 @@ func NewDepositBilling(opts ...Options) *billing.Billing {
 
 						if res == processors.Success {
 							invoice.Status = models.InvPaid
-                            invoice.PaidAt = time.Now().UTC()
+							invoice.PaidAt = time.Now().UTC()
 							trx.Status = models.TrxSuccess
 							if err := ctx.Invoice.Query(database.WithFilter("id", invoice.ID)).Update(*invoice); err != nil {
 								utilities.JSON(w).SetMessage(err.Error()).SetStatus(utilities.ResponseFail).

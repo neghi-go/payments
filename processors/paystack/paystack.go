@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"net/http"
 	"time"
 
@@ -259,6 +260,8 @@ func (p *Paystack) Verify(ctx context.Context, trx_id string) (processors.Verify
 	if err := json.NewDecoder(res.Body).Decode(&res_body); err != nil {
 		return 0, err
 	}
+
+    fmt.Println(&res_body)
 
 	if !res_body.Status {
 		return 0, errors.New("paystack: we had an issue verifying that transaction")
